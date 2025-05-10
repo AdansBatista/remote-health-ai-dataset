@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+title: Remote-Health AI Synthetic Dataset
+authors:
+  - family-names: Schmidt Batista
+    given-names: Adans
+    orcid: https://orcid.org/0009-0004-0401-2321
+version: "v1.1.0"
+doi: 10.5281/zenodo.1234567          # (fill in)
+date-released: 2025-05-11
+url: https://github.com/AdansBatista/remote-health-ai-dataset
+license: CC-BY-4.0
+message: >
+  If you use this dataset or code, please cite:
+  Schmidt Batista, A. Empowering Remote Healthcare with On-Premises Solar-Powered AI Units (2025).
