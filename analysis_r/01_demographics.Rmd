@@ -1,0 +1,207 @@
+---
+title: "Data Analysis for Solar-Powered AI Healthcare Units"
+author: "Research Team"
+date: "May 12, 2025"
+output: html_document
+---
+
+## Introduction
+
+This report analyzes a synthetic dataset designed to train four TinyLLaMA models for generating Subjective, Objective, Assessment, and Plan (SOAP) notes in a solar-powered, on-premises AI unit for rural healthcare. The dataset, comprising 1,032 patient records with demographics, chief complaints, transcriptions, and SOAP notes, simulates clinical encounters to enable offline medical transcription and diagnostic support. An augmented dataset provides paraphrased SOAP sections to enhance model robustness. The analysis aims to explore the dataset’s structure, preprocess it for fine-tuning, evaluate potential biases, and document the process transparently to invite public critique. This work supports the development of affordable, sustainable AI solutions for remote regions with limited infrastructure.
+
+```{r setup, echo=TRUE, message=FALSE, warning=FALSE}
+# Load required libraries
+library(jsonlite)
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+
+# Verify dataset availability
+patients_file <- "../data/synthetic_patients_with_soap.jsonl"
+augmented_file <- "../data/soap_augmented.jsonl"
+if (!file.exists(patients_file) || !file.exists(augmented_file)) {
+  stop("Dataset files not found in data directory")
+}
+
+# Load datasets (limited to first 10 rows for quick verification)
+patients <- stream_in(file(patients_file), verbose = FALSE)[1:10, ]
+augmented <- stream_in(file(augmented_file), verbose = FALSE)[1:10, ]
+
+# Display row counts
+cat("Primary dataset rows (sample):", nrow(patients), "\n")
+cat("Augmented dataset rows (sample):", nrow(augmented), "\n")
+```
+
+## Data Description
+This section provides an overview of the synthetic datasets structure, including patient demographics, chief complaints, transcriptions, and SOAP notes, as well as the augmented datasets paraphrased SOAP sections.
+
+```{r structure, echo=TRUE}
+# Display structure of primary dataset
+str(patients, max.level = 1)
+
+# Display structure of augmented dataset
+str(augmented, max.level = 1)
+```
+
+### Demographic Distribution
+
+We examine the distribution of demographic variables to understand the dataset's representativeness.
+
+```{r age_histogram, echo=TRUE, fig.width=8, fig.height=6}
+# Load the full primary dataset for analysis
+patients_full <- stream_in(file("../data/synthetic_patients_with_soap.jsonl"), verbose = FALSE)
+
+# Create a histogram of age distribution
+ggplot(patients_full, aes(x = age)) +
+  geom_histogram(binwidth = 5, fill = "blue", alpha = 0.6) +
+  labs(title = "Age Distribution of Synthetic Patients", x = "Age", y = "Count") +
+  theme_minimal()
+```
+```{r gender_barplot, echo=TRUE, fig.width=8, fig.height=6}
+# Create a bar plot of gender distribution
+ggplot(patients_full, aes(x = gender, fill = gender)) +
+  geom_bar(alpha = 0.6) +
+  labs(title = "Gender Distribution of Synthetic Patients", x = "Gender", y = "Count") +
+  theme_minimal()
+```
+```{r smoker_barplot, echo=TRUE, fig.width=8, fig.height=6}
+# Create a bar plot of smoker status distribution
+ggplot(patients_full, aes(x = smoker, fill = smoker)) +
+  geom_bar(alpha = 0.6) +
+  labs(title = "Smoker Status Distribution of Synthetic Patients", x = "Smoker Status", y = "Count") +
+  theme_minimal()
+```
+```{r drinker_barplot, echo=TRUE, fig.width=8, fig.height=6}
+# Create a bar plot of drinker status distribution
+ggplot(patients_full, aes(x = drinker, fill = drinker)) +
+  geom_bar(alpha = 0.6) +
+  labs(title = "Drinker Status Distribution of Synthetic Patients", x = "Drinker Status", y = "Count") +
+  theme_minimal()
+```
+### Chief Complaints
+
+This subsection examines the frequency of chief complaints to identify common health concerns in the synthetic dataset.
+
+```{r chief_complaints_barplot, echo=TRUE, fig.width=8, fig.height=6}
+# Calculate the top 10 chief complaints
+top_complaints <- patients_full %>%
+  count(chief_complaint, sort = TRUE) %>%
+  slice_head(n = 10)
+
+# Create a bar plot of the top 10 chief complaints without a legend
+ggplot(top_complaints, aes(x = reorder(chief_complaint, -n), y = n, fill = chief_complaint)) +
+  geom_bar(stat = "identity", alpha = 0.6) +
+  labs(title = "Top 10 Chief Complaints in Synthetic Dataset", x = "Chief Complaint", y = "Frequency") +
+  theme_minimal() +
+  coord_flip() +
+  theme(legend.position = "none")
+```
+
+### SOAP Notes Summary
+
+This subsection summarizes the structure of the SOAP notes, including the distribution of sections and formats in the augmented dataset.
+```{r soap_sample, echo=TRUE}
+# Load the full augmented dataset
+augmented_full <- stream_in(file("../data/soap_augmented.jsonl"), verbose = FALSE)
+
+# Extract section and format from custom_id
+augmented_full <- augmented_full %>%
+  mutate(
+    section = sub("^row[0-9]+_([^_]+)_.*$", "\\1", custom_id),
+    format = sub("^row[0-9]+_[^_]+_(.*)$", "\\1", custom_id),
+    # Extract the paraphrased text from the nested response column
+    text = sapply(response$body$choices, function(x) x$message$content)
+  )
+
+# Sample paraphrased sections for the first patient (row0000) for Subjective section
+sample_soap <- augmented_full %>%
+  filter(grepl("^row0000", custom_id) & section == "subjective") %>%
+  select(format, text)
+
+# Display the sample
+print(sample_soap)
+```
+
+## Data Preprocessing
+
+To train four TinyLLaMA models, we preprocess the augmented dataset by splitting it into four subsets, each corresponding to a SOAP section: Subjective, Objective, Assessment, and Plan. This ensures each model is fine-tuned on relevant data.
+
+```{r preprocess_split, echo=TRUE}
+# Ensure the data directory exists
+dir.create("../data", showWarnings = FALSE)
+
+# Split the augmented dataset into four subsets
+subjective <- augmented_full %>% filter(section == "subjective") %>% select(format, text)
+objective <- augmented_full %>% filter(section == "objective") %>% select(format, text)
+assessment <- augmented_full %>% filter(section == "assessment") %>% select(format, text)
+plan <- augmented_full %>% filter(section == "plan") %>% select(format, text)
+
+# Save each subset as a JSONL file
+write_json(subjective, "../data/subjective.jsonl", auto_unbox = TRUE, pretty = TRUE)
+write_json(objective, "../data/objective.jsonl", auto_unbox = TRUE, pretty = TRUE)
+write_json(assessment, "../data/assessment.jsonl", auto_unbox = TRUE, pretty = TRUE)
+write_json(plan, "../data/plan.jsonl", auto_unbox = TRUE, pretty = TRUE)
+
+# Confirm the files were created
+cat("Preprocessed files saved:\n")
+cat("Subjective:", file.exists("../data/subjective.jsonl"), "\n")
+cat("Objective:", file.exists("../data/objective.jsonl"), "\n")
+cat("Assessment:", file.exists("../data/assessment.jsonl"), "\n")
+cat("Plan:", file.exists("../data/plan.jsonl"), "\n")
+```
+
+## Bias and Uncertainties Analysis
+
+This section examines potential biases in the synthetic dataset, such as demographic imbalances, and discusses uncertainties that may affect model performance in real-world settings.
+
+### Demographic Bias
+
+The synthetic dataset uses random assignments for demographic variables like gender, age, smoker, and drinker status. Imbalances in these distributions may bias model predictions, potentially affecting fairness in healthcare applications.
+
+```{r demographic_proportions, echo=TRUE}
+# Calculate proportions for gender, smoker, and drinker
+gender_prop <- prop.table(table(patients_full$gender)) * 100
+smoker_prop <- prop.table(table(patients_full$smoker)) * 100
+drinker_prop <- prop.table(table(patients_full$drinker)) * 100
+
+# Display the proportions
+cat("Gender Proportions (%):\n")
+print(gender_prop)
+cat("\nSmoker Proportions (%):\n")
+print(smoker_prop)
+cat("\nDrinker Proportions (%):\n")
+print(drinker_prop)
+```
+```{r gender_proportions_plot, echo=TRUE, fig.width=8, fig.height=6}
+# Convert gender proportions to a data frame for plotting
+gender_df <- as.data.frame(prop.table(table(patients_full$gender)) * 100)
+colnames(gender_df) <- c("Gender", "Percentage")
+
+# Create a bar plot of gender proportions
+ggplot(gender_df, aes(x = Gender, y = Percentage, fill = Gender)) +
+  geom_bar(stat = "identity", alpha = 0.6) +
+  labs(title = "Gender Proportions in Synthetic Dataset", x = "Gender", y = "Percentage (%)") +
+  theme_minimal()
+```
+```{r smoker_proportions_plot, echo=TRUE, fig.width=8, fig.height=6}
+# Convert smoker proportions to a data frame for plotting
+smoker_df <- as.data.frame(prop.table(table(patients_full$smoker)) * 100)
+colnames(smoker_df) <- c("Smoker", "Percentage")
+
+# Create a bar plot of smoker proportions
+ggplot(smoker_df, aes(x = Smoker, y = Percentage, fill = Smoker)) +
+  geom_bar(stat = "identity", alpha = 0.6) +
+  labs(title = "Smoker Proportions in Synthetic Dataset", x = "Smoker Status", y = "Percentage (%)") +
+  theme_minimal()
+```
+```{r drinker_proportions_plot, echo=TRUE, fig.width=8, fig.height=6}
+# Convert drinker proportions to a data frame for plotting
+drinker_df <- as.data.frame(prop.table(table(patients_full$drinker)) * 100)
+colnames(drinker_df) <- c("Drinker", "Percentage")
+
+# Create a bar plot of drinker proportions
+ggplot(drinker_df, aes(x = Drinker, y = Percentage, fill = Drinker)) +
+  geom_bar(stat = "identity", alpha = 0.6) +
+  labs(title = "Drinker Proportions in Synthetic Dataset", x = "Drinker Status", y = "Percentage (%)") +
+  theme_minimal()
+``` 

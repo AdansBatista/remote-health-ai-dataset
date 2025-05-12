@@ -19,13 +19,24 @@ All tunable numbers live in the CONFIG dict.
 from __future__ import annotations
 
 import json, random, time
+import sys
 from pathlib import Path
 from typing import Dict, List
 import os
 import pandas as pd
-from openai import OpenAI, OpenAIError
+from openai import OpenAI
+from dotenv import load_dotenv
 
+load_dotenv()
 openai_key = os.getenv("OPENAI_API_KEY")
+
+if not openai_key:
+    # stop early with a clear message
+    sys.exit("❌  OPENAI_API_KEY not found in environment")
+
+# mask all but the first 6 characters
+masked = openai_key[:6] + "…" + openai_key[-4:]
+print(f"🔑  OPENAI_API_KEY loaded: {masked}")
 
 # ╔════════════════════════════════╗
 # ║            CONFIG              ║
@@ -81,7 +92,7 @@ Facts you MUST weave in naturally:
 - smoker: {{smoker}}, drinker: {{drinker}}, BP: {{bp}}
 
 Important: You will be creative, producing a unique narrative based on the facts presented, 
-you will trive your best to create a natural encouter that no one never heard about before.
+you will work hard on your best to create a natural encounter that no one never heard about before.
 
 Return ONLY a JSON object on ONE line:
 {{{{"transcription": "full text here"}}}}
@@ -92,7 +103,7 @@ in your response, only a valid plain JSON.
 # ╔═════════════════════════════════╗
 # ║ 1. build local demographic rows ║
 # ╚═════════════════════════════════╝
-def build_rows(n: int) -> pd.DataFrame:
+def build_rows(_n: int) -> pd.DataFrame:
     rows = []
 
     for i in range(CONFIG["TARGET_ROWS"]):
@@ -169,7 +180,10 @@ while True:
 # ╚════════════════════════════════╝
 output_file = client.files.retrieve(batch_job.output_file_id)
 out_path = OUT_DIR / "batch_output.jsonl"
-client.files.download_to_file(output_file.id, str(out_path))
+response = client.files.content(output_file.id)
+with out_path.open("wb") as fh:
+    for chunk in response.iter_bytes():
+        fh.write(chunk)
 print("✓ downloaded", out_path)
 
 tx_map: Dict[str, str] = {}
